@@ -11,20 +11,17 @@
 #     build:      list<string>   # dot-separated identifiers; [] when none
 #   }
 #
-# `to record` is the inverse of `"to string"`. Comparison and sort follow spec
+# `decode` is the inverse of `encode`. Comparison and sort follow spec
 # rule 11 (major.minor.patch first, then dot-wise prerelease comparison
 # with numeric < alphanumeric, build metadata ignored).
 #
 # Public commands:
-#   semver to record       — string → record (errors on invalid input)
+#   semver decode       — string → record (errors on invalid input)
 #   semver is-valid     — string → bool
-#   semver to string       — record → string
+#   semver encode       — record → string
 #   semver compare      — record record → -1 | 0 | 1
 #   semver sort         — list<record> → list<record>
 #   semver bump major   — record → record  (also: bump minor, bump patch)
-#
-# (`to record` rather than `parse` to avoid shadowing the built-in
-# `parse --regex` inside this module's own body.)
 
 # Official spec regex (named-captures form) from semver.org. Enforces
 # every BNF rule: no leading zeros on numeric identifiers (rule 2,
@@ -80,7 +77,7 @@ def cmp-pre-list [a: list<string>, b: list<string>]: nothing -> int {
 # ---------- single-item helpers (private) ----------
 
 # Decode one semver string into a record. Errors on invalid input.
-# `to record` dispatches to this for each item when given a list.
+# `decode` dispatches to this for each item when given a list.
 def parse-one []: string -> record {
   let v = $in
   let m = $v | parse --regex $SEMVER_REGEX
@@ -113,12 +110,12 @@ def format-one []: record -> string {
 # list of records (broadcasting).
 #
 # Errors when any input does not conform to the SemVer 2.0.0 BNF.
-@search-terms semver to record parse version
-@example "core only" { '1.2.3' | semver to record } --result { major: 1, minor: 2, patch: 3, prerelease: [], build: [] }
-@example "prerelease and build" { '1.2.3-rc.1+exp.5114' | semver to record } --result { major: 1, minor: 2, patch: 3, prerelease: [rc 1], build: [exp 5114] }
-@example "list broadcasting" { ['1.2.3' '2.0.0-rc.1'] | semver to record | length } --result 2
-@example "leading zero rejected" { try { '01.2.3' | semver to record } catch {|e| $e.msg} } --result "invalid semver: '01.2.3'"
-export def "to record" []: [string -> record, list<string> -> list<record>] {
+@search-terms semver decode parse version
+@example "core only" { '1.2.3' | semver decode } --result { major: 1, minor: 2, patch: 3, prerelease: [], build: [] }
+@example "prerelease and build" { '1.2.3-rc.1+exp.5114' | semver decode } --result { major: 1, minor: 2, patch: 3, prerelease: [rc 1], build: [exp 5114] }
+@example "list broadcasting" { ['1.2.3' '2.0.0-rc.1'] | semver decode | length } --result 2
+@example "leading zero rejected" { try { '01.2.3' | semver decode } catch {|e| $e.msg} } --result "invalid semver: '01.2.3'"
+export def decode []: [string -> record, list<string> -> list<record>] {
   let v = $in
   if (($v | describe) == 'string') {
     $v | parse-one
@@ -139,12 +136,12 @@ export def is-valid []: string -> bool {
 # Render a semver record back to its canonical string form, or a list
 # of records into a list of strings (broadcasting).
 #
-# Inverse of `to record`. `'<x>' | semver to record | semver to string`
-# is a fixed point for any spec-valid input.
-@search-terms semver format render stringify encode
-@example "roundtrip" { '1.2.3-rc.1+exp.5114' | semver to record | semver to string } --result '1.2.3-rc.1+exp.5114'
-@example "list broadcasting" { ['1.2.3' '2.0.0'] | semver to record | semver to string } --result ['1.2.3' '2.0.0']
-export def "to string" []: [record -> string, list<record> -> list<string>] {
+# Inverse of `decode`. `'<x>' | semver decode | semver encode` is a
+# fixed point for any spec-valid input.
+@search-terms semver encode format render stringify
+@example "roundtrip" { '1.2.3-rc.1+exp.5114' | semver decode | semver encode } --result '1.2.3-rc.1+exp.5114'
+@example "list broadcasting" { ['1.2.3' '2.0.0'] | semver decode | semver encode } --result ['1.2.3' '2.0.0']
+export def encode []: [record -> string, list<record> -> list<string>] {
   let v = $in
   if (($v | describe) | str starts-with 'record') {
     $v | format-one
@@ -159,9 +156,9 @@ export def "to string" []: [record -> string, list<record> -> list<string>] {
 # Build metadata is ignored (spec rule 10): `1.0.0+abc` and
 # `1.0.0+def` compare equal.
 @search-terms semver compare cmp precedence ordering
-@example "patch ordering" { semver compare ('1.2.3' | semver to record) ('1.2.4' | semver to record) } --result -1
-@example "prerelease ranks below release" { semver compare ('1.0.0-alpha' | semver to record) ('1.0.0' | semver to record) } --result -1
-@example "build metadata ignored" { semver compare ('1.0.0+abc' | semver to record) ('1.0.0+def' | semver to record) } --result 0
+@example "patch ordering" { semver compare ('1.2.3' | semver decode) ('1.2.4' | semver decode) } --result -1
+@example "prerelease ranks below release" { semver compare ('1.0.0-alpha' | semver decode) ('1.0.0' | semver decode) } --result -1
+@example "build metadata ignored" { semver compare ('1.0.0+abc' | semver decode) ('1.0.0+def' | semver decode) } --result 0
 export def compare [a: record, b: record]: nothing -> int {
   let c1 = cmp-int $a.major $b.major
   if $c1 != 0 { return $c1 }
@@ -178,7 +175,7 @@ export def compare [a: record, b: record]: nothing -> int {
 # format back.
 @search-terms semver sort order rank
 @example "ascending" {
-  ['1.10.0' '1.2.0' '1.2.0-rc.1'] | each { semver to record } | semver sort | each { semver to string }
+  ['1.10.0' '1.2.0' '1.2.0-rc.1'] | each { semver decode } | semver sort | each { semver encode }
 } --result ['1.2.0-rc.1' '1.2.0' '1.10.0']
 export def sort [--reverse]: list<record> -> list<record> {
   if $reverse {
@@ -191,7 +188,7 @@ export def sort [--reverse]: list<record> -> list<record> {
 # Increment the major number; reset minor and patch to 0 and clear
 # any pre-release and build metadata (spec rule 8 + convention).
 @search-terms semver bump major increment
-@example "bump major" { '1.2.3-rc.1+build' | semver to record | semver bump major | semver to string } --result '2.0.0'
+@example "bump major" { '1.2.3-rc.1+build' | semver decode | semver bump major | semver encode } --result '2.0.0'
 export def "bump major" []: record -> record {
   let v = $in
   { major: ($v.major + 1), minor: 0, patch: 0, prerelease: [], build: [] }
@@ -200,7 +197,7 @@ export def "bump major" []: record -> record {
 # Increment the minor number; reset patch to 0 and clear any
 # pre-release and build metadata.
 @search-terms semver bump minor increment
-@example "bump minor" { '1.2.3-rc.1' | semver to record | semver bump minor | semver to string } --result '1.3.0'
+@example "bump minor" { '1.2.3-rc.1' | semver decode | semver bump minor | semver encode } --result '1.3.0'
 export def "bump minor" []: record -> record {
   let v = $in
   { major: $v.major, minor: ($v.minor + 1), patch: 0, prerelease: [], build: [] }
@@ -209,7 +206,7 @@ export def "bump minor" []: record -> record {
 # Increment the patch number; clear any pre-release and build
 # metadata. The conventional reading of spec rule 6.
 @search-terms semver bump patch increment
-@example "bump patch" { '1.2.3' | semver to record | semver bump patch | semver to string } --result '1.2.4'
+@example "bump patch" { '1.2.3' | semver decode | semver bump patch | semver encode } --result '1.2.4'
 export def "bump patch" []: record -> record {
   let v = $in
   { major: $v.major, minor: $v.minor, patch: ($v.patch + 1), prerelease: [], build: [] }
