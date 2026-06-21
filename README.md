@@ -76,11 +76,11 @@ let release = ('1.0.0' | semver decode)
 $prerelease | semver compare $release
 # => -1   (prerelease ranks below release)
 
-# sort a list
+# sort a list — decode/encode broadcast over lists, so no `each` is needed
 ['1.10.0' '1.2.0' '1.2.0-rc.1']
-| each { semver decode }
+| semver decode
 | semver sort
-| each { semver encode }
+| semver encode
 # => ['1.2.0-rc.1' '1.2.0' '1.10.0']
 
 # bump
@@ -108,13 +108,14 @@ $prerelease | semver compare $release
 |---------|-----------|-------------|
 | `semver decode` | `string -> record` / `list<string> -> list<record>` | Parse a semver string. Raises an error on non-conforming input. Broadcasts over lists. |
 | `semver is-valid` | `string -> bool` / `list<string> -> list<bool>` | True when the string conforms to the spec BNF. Allocates no record. Broadcasts over lists. |
-| `semver encode` | `record -> string` / `list<record> -> list<string>` | Render a record back to canonical string form. Inverse of `decode`. |
+| `semver encode` | `record -> string` / `list<record> -> list<string>` | Render a record back to canonical string form. Inverse of `decode`. Broadcasts over lists. |
 | `semver compare` | `record -> int` | Compares the piped record against the `other` argument. Returns `-1`, `0`, or `1` per spec rule 11. Build metadata is ignored (rule 10). |
 | `semver sort` | `list<record> -> list<record>` | Sort by precedence. Pass `--reverse` for descending. |
 | `semver bump major` | `record -> record` | Increment major; reset minor/patch to `0`; clear prerelease and build. |
 | `semver bump minor` | `record -> record` | Increment minor; reset patch to `0`; clear prerelease and build. |
 | `semver bump patch` | `record -> record` | Increment patch; clear prerelease and build. |
 
+`decode`, `encode`, and `is-valid` broadcast: each accepts either a single value or a list and acts element-wise, so you rarely need `each`. `compare` and `bump` operate on a single record — map them with `each` (or reach for `semver sort`) when working over a collection.
 
 ## Spec compliance
 
@@ -126,10 +127,10 @@ Parsing uses the official [SemVer 2.0.0 BNF regex](https://semver.org/spec/v2.0.
 When the input is untrusted (git tags, manifest fields, user input), either guard with `semver is-valid` before decoding or against the error:
 ```nu
 ['1.4.0' 'v2' '2.0.0-rc.1' 'latest']
-| each { try {$in | semver decode} catch {null} }
+| each { try {$in | semver decode} catch {null} }   # per-item try/catch: decode is strict, so guard each element
 | compact
 | semver sort
-| each { semver encode }
+| semver encode
 # => ['1.4.0' '2.0.0-rc.1']
 ```
 
@@ -192,7 +193,7 @@ def support-matrix []: nothing -> table {
     | lines
     | each {|t| $t | str replace --regex '^v' '' }
     | where { semver is-valid }
-    | each { semver decode }
+    | semver decode
     | where (($in.prerelease) | is-empty)
     | group-by major
     | items {|major rows| {
