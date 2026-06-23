@@ -6,23 +6,33 @@ parse, validate, compare, sort, and bump versions as structured data.
 
 ---
 
-- [Why?](#why?)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Commands](#commands)
-- [Spec conformance - what is conventional anyway?](#spec-conformance---what-is-conventional-anyway?)
-    - [Strict in both directions](#strict-in-both-directions)
-    - [No `bump prerelease`](#no-`bump-prerelease`)
-    - [Untrusted input](#untrusted-input)
-- [CI/CD recipes](#ci/cd-recipes)
-  - [Resolve the latest released version from git tags](#resolve-the-latest-released-version-from-git-tags)
-  - [Build a pre-release tag for a non-master branch](#build-a-pre-release-tag-for-a-non-master-branch)
-  - [Derive the next version from conventional commits](#derive-the-next-version-from-conventional-commits)
-  - [Maintain a per-major support matrix](#maintain-a-per-major-support-matrix)
-  - [Pre-release strategies](#pre-release-strategies)
-    - [Bump the counter (npm `prerelease`)](#bump-the-counter-(npm-`prerelease`))
-    - [Promote to the next stage](#promote-to-the-next-stage)
-    - [Finalize a release](#finalize-a-release)
+- [semantic-versioning (semver)](#semantic-versioning-(semver))
+  - [Why?](#why?)
+  - [Installation](#installation)
+  - [Quick start](#quick-start)
+  - [Commands](#commands)
+    - [`semver bump major`](#`semver-bump-major`)
+    - [`semver bump minor`](#`semver-bump-minor`)
+    - [`semver bump patch`](#`semver-bump-patch`)
+    - [`semver compare`](#`semver-compare`)
+    - [`semver decode`](#`semver-decode`)
+    - [`semver encode`](#`semver-encode`)
+    - [`semver is-valid`](#`semver-is-valid`)
+    - [`semver sort`](#`semver-sort`)
+  - [Spec conformance - what is conventional anyway?](#spec-conformance---what-is-conventional-anyway?)
+      - [Strict in both directions](#strict-in-both-directions)
+      - [No `bump prerelease`](#no-`bump-prerelease`)
+      - [Untrusted input](#untrusted-input)
+  - [CI/CD recipes](#ci/cd-recipes)
+    - [Resolve the latest released version from git tags](#resolve-the-latest-released-version-from-git-tags)
+    - [Build a pre-release tag for a non-master branch](#build-a-pre-release-tag-for-a-non-master-branch)
+    - [Derive the next version from conventional commits](#derive-the-next-version-from-conventional-commits)
+    - [Maintain a per-major support matrix](#maintain-a-per-major-support-matrix)
+    - [Pre-release strategies](#pre-release-strategies)
+      - [Bump the counter (npm `prerelease`)](#bump-the-counter-(npm-`prerelease`))
+      - [Promote to the next stage](#promote-to-the-next-stage)
+      - [Finalize a release](#finalize-a-release)
+
 
 ## Why?
 
@@ -96,17 +106,175 @@ $prerelease | semver compare $release
 ## Commands
 
 | Command | Signature | Description |
-|---------|-----------|-------------|
-| `semver decode` | `string -> record` / `list<string> -> list<record>` | Parse a string into a validated record. Strict: rejects any string the spec rejects. Broadcasts over lists. |
-| `semver is-valid` | `string -> bool` / `list<string> -> list<bool>` | True when the string conforms to the spec BNF. Allocates no record. Broadcasts over lists. |
-| `semver encode` | `record -> string` / `list<record> -> list<string>` | Render a record back to its canonical string — the exact inverse of `decode`. Strict: rejects any record that wouldn't be a spec-valid version. Broadcasts over lists. |
-| `semver compare` | `record -> int` | Compares the piped record against the `other` argument. Returns `-1`, `0`, or `1` per spec rule 11. Build metadata is ignored (rule 10). |
-| `semver sort` | `list<record> -> list<record>` | Sort by precedence. Pass `--reverse` for descending. |
-| `semver bump major` | `record -> record` | Increment major; reset minor/patch to `0`; clear prerelease and build. |
-| `semver bump minor` | `record -> record` | Increment minor; reset patch to `0`; clear prerelease and build. |
-| `semver bump patch` | `record -> record` | Increment patch; clear prerelease and build. |
+| --- | --- | --- |
+| [`semver bump major`](#semver-bump-major) | `record -> record` | Increment the major number; reset minor and patch to 0 and clear any pre-release and build metadata. |
+| [`semver bump minor`](#semver-bump-minor) | `record -> record` | Increment the minor number; reset patch to 0 and clear any pre-release and build metadata. |
+| [`semver bump patch`](#semver-bump-patch) | `record -> record` | Increment the patch number; clear any pre-release and build metadata. |
+| [`semver compare`](#semver-compare) | `record -> int` | Compare the piped semver record against another per spec. |
+| [`semver decode`](#semver-decode) | `string -> record` / `list<string> -> list<record>` | Decode a semver string into a record, or a list of strings into a list of records. |
+| [`semver encode`](#semver-encode) | `record -> string` / `list<record> -> list<string>` | Render a semver record back to its canonical string form, or a list of records into a list of strings. |
+| [`semver is-valid`](#semver-is-valid) | `string -> bool` / `list<string> -> list<bool>` | True when the piped string is a valid semver per the spec BNF. |
+| [`semver sort`](#semver-sort) | `list<record> -> list<record>` | Sort a list of semver records by precedence. |
 
-`decode`, `encode`, and `is-valid` broadcast: each accepts either a single value or a list and acts element-wise, so you rarely need `each`. `compare` and `bump` operate on a single record — map them with `each` (or reach for `semver sort`) when working over a collection.
+### `semver bump major`
+
+Increment the major number; reset minor and patch to 0 and clear any pre-release and build metadata.
+
+**Signature:** `record -> record`
+
+**Search terms:** `semver`, `bump`, `major`, `increment`
+
+**Examples**
+
+```nu
+# bump major
+'1.2.3-rc.1+build' | semver decode | semver bump major | semver encode
+# => "2.0.0"
+```
+
+### `semver bump minor`
+
+Increment the minor number; reset patch to 0 and clear any pre-release and build metadata.
+
+**Signature:** `record -> record`
+
+**Search terms:** `semver`, `bump`, `minor`, `increment`
+
+**Examples**
+
+```nu
+# bump minor
+'1.2.3-rc.1' | semver decode | semver bump minor | semver encode
+# => "1.3.0"
+```
+
+### `semver bump patch`
+
+Increment the patch number; clear any pre-release and build metadata.
+
+**Signature:** `record -> record`
+
+**Search terms:** `semver`, `bump`, `patch`, `increment`
+
+**Examples**
+
+```nu
+# bump patch
+'1.2.3' | semver decode | semver bump patch | semver encode
+# => "1.2.4"
+```
+
+### `semver compare`
+
+Compare the piped semver record against another per spec. Returns -1 when the piped record sorts before `other`, 1 when after, 0 when equal.
+
+**Signature:** `record -> int`
+
+**Parameters**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `other` | `record` | the semver record to compare the piped one against |
+
+**Search terms:** `semver`, `compare`, `cmp`, `precedence`, `ordering`
+
+**Examples**
+
+```nu
+# patch ordering
+('1.2.3' | semver decode) | semver compare ('1.2.4' | semver decode)
+# => -1
+
+# prerelease ranks below release
+('1.0.0-alpha' | semver decode) | semver compare ('1.0.0' | semver decode)
+# => -1
+
+# build metadata ignored
+('1.0.0+abc' | semver decode) | semver compare ('1.0.0+def' | semver decode)
+# => 0
+```
+
+### `semver decode`
+
+Decode a semver string into a record, or a list of strings into a list of records. Raises an error on input that does not conform to the spec.
+
+**Signature:** `string -> record` / `list<string> -> list<record>`
+
+**Search terms:** `semver`, `decode`, `parse`, `version`
+
+**Examples**
+
+```nu
+# core only
+'1.2.3' | semver decode
+# => {major: 1, minor: 2, patch: 3, prerelease: [], build: []}
+
+# prerelease and build
+'1.2.3-rc.1+exp.5114' | semver decode
+# => {major: 1, minor: 2, patch: 3, prerelease: [rc, 1], build: [exp, 5114]}
+```
+
+### `semver encode`
+
+Render a semver record back to its canonical string form, or a list of records into a list of strings.
+
+**Signature:** `record -> string` / `list<record> -> list<string>`
+
+**Search terms:** `semver`, `encode`, `format`, `render`, `stringify`
+
+**Examples**
+
+```nu
+# roundtrip
+'1.2.3-rc.1+exp.5114' | semver decode | semver encode
+# => "1.2.3-rc.1+exp.5114"
+```
+
+### `semver is-valid`
+
+True when the piped string is a valid semver per the spec BNF. Broadcasts over a list of strings, returning one bool per element.
+
+**Signature:** `string -> bool` / `list<string> -> list<bool>`
+
+**Search terms:** `semver`, `valid`, `check`
+
+**Examples**
+
+```nu
+# valid
+'1.2.3-rc.1' | semver is-valid
+# => true
+
+# leading zero rejected
+'01.2.3' | semver is-valid
+# => false
+
+# build allows leading zeros
+'1.2.3+01' | semver is-valid
+# => true
+```
+
+### `semver sort`
+
+Sort a list of semver records by precedence.
+
+**Signature:** `list<record> -> list<record>`
+
+**Parameters**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `--reverse` | `switch` | sort by descending precedence (highest first) instead of ascending |
+
+**Search terms:** `semver`, `sort`, `order`, `rank`
+
+**Examples**
+
+```nu
+# ascending
+['1.10.0' '1.2.0' '1.2.0-rc.1'] | each { semver decode } | semver sort | each { semver encode }
+# => ["1.2.0-rc.1", "1.2.0", "1.10.0"]
+```
 
 ## Spec conformance - what is conventional anyway?
 

@@ -204,7 +204,9 @@ export def encode []: [record -> string, list<record> -> list<string>] {
 @example "patch ordering" { ('1.2.3' | semver decode) | semver compare ('1.2.4' | semver decode) } --result -1
 @example "prerelease ranks below release" { ('1.0.0-alpha' | semver decode) | semver compare ('1.0.0' | semver decode) } --result -1
 @example "build metadata ignored" { ('1.0.0+abc' | semver decode) | semver compare ('1.0.0+def' | semver decode) } --result 0
-export def compare [other: record]: record -> int {
+export def compare [
+  other: record  # the semver record to compare the piped one against
+]: record -> int {
   let a = $in | check-record
   let b = $other | check-record
   let c1 = cmp-int $a.major $b.major
@@ -221,7 +223,9 @@ export def compare [other: record]: record -> int {
 @example "ascending" {
   ['1.10.0' '1.2.0' '1.2.0-rc.1'] | each { semver decode } | semver sort | each { semver encode }
 } --result ['1.2.0-rc.1' '1.2.0' '1.10.0']
-export def sort [--reverse]: list<record> -> list<record> {
+export def sort [
+  --reverse  # sort by descending precedence (highest first) instead of ascending
+]: list<record> -> list<record> {
   if $reverse {
     $in | sort-by --custom {|a b| ($a | compare $b) < 0} --reverse
   } else {
