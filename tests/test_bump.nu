@@ -76,3 +76,9 @@ def "bump raises a descriptive error on a malformed record" [] {
     assert error {|| { major: 1 } | bump minor }
     assert error {|| { major: 1 } | bump patch }
 }
+
+@test
+def "bump rejects a record with a wrong-typed field" [] {
+    assert error {|| { major: 'x', minor: 0, patch: 0, prerelease: [], build: [] } | bump major }
+    assert error {|| { major: 1, minor: -2, patch: 0, prerelease: [], build: [] } | bump minor }
+}

@@ -1,26 +1,49 @@
-# semver
+# semantic-versioning (semver)
 
-[Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) for Nushell - parse, validate, compare, sort, and bump versions as structured data.
+[Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) for Nushell 
 
-1. [semver](#semver)
-   1. [Why?](#why?)
-   2. [Installation](#installation)
-   3. [Quick start](#quick-start)
-   4. [Record shape](#record-shape)
-   5. [Commands](#commands)
-   6. [Spec compliance](#spec-compliance)
-      1. [Non-conforming input](#non-conforming-input)
-   7. [CI/CD recipes](#ci/cd-recipes)
-      1. [Resolve the latest released version from git tags](#resolve-the-latest-released-version-from-git-tags)
-      2. [Build a pre-release tag for a non-master branch](#build-a-pre-release-tag-for-a-non-master-branch)
-      3. [Derive the next version from conventional commits](#derive-the-next-version-from-conventional-commits)
-      4. [Maintain a per-major support matrix](#maintain-a-per-major-support-matrix)
+parse, validate, compare, sort, and bump versions as structured data.
 
-## Why?
+1. [semantic-versioning (semver)](#semantic-versioning-(semver))
+2. [Why?](#why?)
+3. [Installation](#installation)
+4. [Quick start](#quick-start)
+5. [Commands](#commands)
+6. [Spec conformance - what is conventional anyway?](#spec-conformance---what-is-conventional-anyway?)
+   1. [Strict in both directions](#strict-in-both-directions)
+   2. [No `bump prerelease`](#no-`bump-prerelease`)
+   3. [Untrusted input](#untrusted-input)
+7. [Pre-release strategies](#pre-release-strategies)
+   1. [Bump the counter (npm `prerelease`)](#bump-the-counter-(npm-`prerelease`))
+   2. [Promote to the next stage](#promote-to-the-next-stage)
+   3. [Finalize a release](#finalize-a-release)
+8. [CI/CD recipes](#ci/cd-recipes)
+   1. [Resolve the latest released version from git tags](#resolve-the-latest-released-version-from-git-tags)
+   2. [Build a pre-release tag for a non-master branch](#build-a-pre-release-tag-for-a-non-master-branch)
+   3. [Derive the next version from conventional commits](#derive-the-next-version-from-conventional-commits)
+   4. [Maintain a per-major support matrix](#maintain-a-per-major-support-matrix)
 
-If you deal with semversions a lot you end up composing the same fragile regex over and over again. Reimplementing it is tedious and prone to error.  
+# Why?
 
-It wuould be nice if we could simply treat semversions as structured data. Something like this:
+Because answering questions like these is more fiddly than it should be:
+- `which of these git tags is the latest release, ignoring pre-releases?`
+- `does 1.0.0-rc.11 come after 1.0.0-rc.2?` (it does — and a plain string sort gets it backwards)
+- `what's the next version, given the type of change I'm shipping?`
+
+This module parses a version into predictable, structured data, according to the official specification, so you can answer those questions with ease and precision:
+
+```nu
+# the latest stable release
+['v1.10.0' '1.2.0' '1.2.0-rc.1' 'nightly']
+| each { str replace --regex '^v' '' }
+| where { semver is-valid }
+| semver decode
+| where { $in.prerelease | is-empty }
+| semver sort | last | semver encode
+# => '1.10.0'
+```
+
+A version becomes a record:
 ```nu
 {
   major:      int
@@ -31,17 +54,19 @@ It wuould be nice if we could simply treat semversions as structured data. Somet
 }
 ```
 
-Then we could have some utility functions for sorting, comparing, and bumping
+and `sort`, `compare`, and `bump` operate on that structure:
 ```nu
-'1.2.3-rc.1+build' 
-| semver decode # => {major: 1, minor: 2, patch: 3, prerelease: [rc, "1"], build: [build]}
-| semver bump major # => {major: 2, minor: 0, patch: 0, prerelease: [], build: []}
-| semver encode # => '2.0.0'
+'1.2.3-rc.1+build'
+| semver decode      # => {major: 1, minor: 2, patch: 3, prerelease: [rc, "1"], build: [build]}
+| semver bump major  # => {major: 2, minor: 0, patch: 0, prerelease: [], build: []}
+| semver encode      # => '2.0.0'
 ```
 
-Yeah this wuould be nice.
+---
 
-## Installation
+Most of this gets done *inside a CI/CD pipeline*, and Nushell is the right tool for it: the ease of a shell with the precision of a general-purpose language. See the [CI/CD recipes](#ci/cd-recipes) for ready-to-adapt examples.
+
+# Installation
 
 ```nu
 # clone into one of your NU_LIB_DIRS
@@ -53,7 +78,7 @@ use semver
 semver decode --help
 ```
 
-## Quick start
+# Quick start
 
 ```nu
 use semver
@@ -65,7 +90,7 @@ use semver
 # validate without throwing
 '01.2.3' | semver is-valid # => false (leading zero)
 
-# round-trip
+# round-trip — decode and encode are exact inverses
 '1.2.3-rc.1' | semver decode | semver encode # => '1.2.3-rc.1'
 
 # compare two versions
@@ -86,27 +111,13 @@ $prerelease | semver compare $release
 # => '2.0.0'
 ```
 
-## Record shape
-
-`semver decode` produces, and `semver encode` consumes, the following shape:
-
-```nu
-{
-  major:      int
-  minor:      int
-  patch:      int
-  prerelease: list<string>   # dot-separated identifiers; [] when none
-  build:      list<string>   # dot-separated identifiers; [] when none
-}
-```
-
-## Commands
+# Commands
 
 | Command | Signature | Description |
 |---------|-----------|-------------|
-| `semver decode` | `string -> record` / `list<string> -> list<record>` | Parse a semver string. Raises an error on non-conforming input. Broadcasts over lists. |
+| `semver decode` | `string -> record` / `list<string> -> list<record>` | Parse a string into a validated record. Strict: rejects any string the spec rejects. Broadcasts over lists. |
 | `semver is-valid` | `string -> bool` / `list<string> -> list<bool>` | True when the string conforms to the spec BNF. Allocates no record. Broadcasts over lists. |
-| `semver encode` | `record -> string` / `list<record> -> list<string>` | Render a record back to canonical string form. Inverse of `decode`. Broadcasts over lists. |
+| `semver encode` | `record -> string` / `list<record> -> list<string>` | Render a record back to its canonical string — the exact inverse of `decode`. Strict: rejects any record that wouldn't be a spec-valid version. Broadcasts over lists. |
 | `semver compare` | `record -> int` | Compares the piped record against the `other` argument. Returns `-1`, `0`, or `1` per spec rule 11. Build metadata is ignored (rule 10). |
 | `semver sort` | `list<record> -> list<record>` | Sort by precedence. Pass `--reverse` for descending. |
 | `semver bump major` | `record -> record` | Increment major; reset minor/patch to `0`; clear prerelease and build. |
@@ -115,16 +126,29 @@ $prerelease | semver compare $release
 
 `decode`, `encode`, and `is-valid` broadcast: each accepts either a single value or a list and acts element-wise, so you rarely need `each`. `compare` and `bump` operate on a single record — map them with `each` (or reach for `semver sort`) when working over a collection.
 
-## Spec compliance
+# Spec conformance - what is conventional anyway?
 
-Parsing uses the official [SemVer 2.0.0 BNF regex](https://semver.org/spec/v2.0.0.html).
+This module adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html). Both directions are pinned to its official BNF regex.
 
-### Non-conforming input
+## Strict in both directions
 
-`semver decode` is strict: a string that doesn't conform to the spec raises an error rather than producing a record. When decoding a list, a single bad item fails the whole pipeline.  
-When the input is untrusted (git tags, manifest fields, user input), either guard with `semver is-valid` before decoding or against the error:
+`decode` will not accept a string the spec rejects, and `encode` will not emit one — the two are exact inverses. `$version | semver decode | semver encode` gives back the original string.
+
+## No `bump prerelease`
+
+Pre-release has no conventional sape and no bump strategy: the spec fixes pre-release *format* and *ordering* but defines no progression (`rc.1 → rc.2`? `alpha → beta`? a commit SHA? a timestamp?), and the module won't pass one convention off as the spec's. Set it as data instead — `encode` still enforces the format:
+
 ```nu
-['1.4.0' 'v2' '2.0.0-rc.1' 'latest']
+'1.2.3' | semver decode | merge { prerelease: ['rc' '1'] } | semver encode  # => '1.2.3-rc.1'
+```
+
+If you do want a convention, [Pre-release strategies](#pre-release-strategies) collects the common ones (npm-style counter, stage promotion, finalize) as ready-to-copy recipes.
+
+## Untrusted input
+
+A single non-conforming item aborts the whole pipeline, so either filter with `semver is-valid` before decoding, or catch per item:
+```nu
+['1.4.0' 'v1.0.0' '2.0.0-rc.1' 'latest']
 | each { try {$in | semver decode} catch {null} }   # per-item try/catch: decode is strict, so guard each element
 | compact
 | semver sort
@@ -132,9 +156,101 @@ When the input is untrusted (git tags, manifest fields, user input), either guar
 # => ['1.4.0' '2.0.0-rc.1']
 ```
 
-## CI/CD recipes
+# Pre-release strategies
 
-### Resolve the latest released version from git tags
+The spec defines no pre-release progression, so the module ships none (see [No `bump prerelease`](#no-bump-prerelease)). Below are the established conventions as copy-paste recipes — pick the lifecycle that fits your team. They share one shape: decode → reshape the `prerelease` list → `encode` (which re-validates), so every result is spec-valid and sorts correctly. All assume `use semver`.
+
+## Bump the counter (npm `prerelease`)
+
+A faithful port of `npm version prerelease [--preid <id>]` — verified identical to `node-semver`'s `inc` across the full case matrix. Increment the right-most numeric identifier; on a clean release, bump the patch and open a new series; with `--preid`, keep counting under that identifier or switch to a fresh `<id>.0`.
+
+```nu
+use semver
+
+def bump-prerelease [--preid: string]: string -> string {
+    let v = $in | semver decode
+    # No pre-release yet → bump patch and open a new series. Otherwise keep the
+    # core and the existing identifiers (npm drops build metadata either way).
+    let base = if ($v.prerelease | is-empty) {
+        $v | semver bump patch
+    } else {
+        $v | merge { build: [] }
+    }
+    # Increment the right-most numeric identifier; if there is none, append `0`.
+    let pre = $base.prerelease
+    let nidx = $pre | enumerate | where {|e| $e.item =~ '^[0-9]+$' } | get index
+    let counted = if ($pre | is-empty) {
+        ['0']
+    } else if ($nidx | is-empty) {
+        $pre | append '0'
+    } else {
+        let i = $nidx | last
+        $pre | update $i (($pre | get $i | into int) + 1 | into string)
+    }
+    # With --preid: keep counting when the leading identifier already matches and
+    # carries a number; otherwise switch to `<preid>.0`.
+    let final = if ($preid | is-empty) {
+        $counted
+    } else if (($counted | first) == $preid) and (($counted | get 1? | default '') =~ '^[0-9]+$') {
+        $counted
+    } else {
+        [$preid '0']
+    }
+    $base | merge { prerelease: $final } | semver encode
+}
+
+'1.2.3'        | bump-prerelease              # => '1.2.4-0'
+'1.2.4-0'      | bump-prerelease              # => '1.2.4-1'
+'1.2.3'        | bump-prerelease --preid rc   # => '1.2.4-rc.0'
+'1.2.4-rc.0'   | bump-prerelease --preid rc   # => '1.2.4-rc.1'
+'1.2.3-beta.5' | bump-prerelease --preid rc   # => '1.2.3-rc.0'   (switches series)
+'1.2.3-beta'   | bump-prerelease              # => '1.2.3-beta.0'
+```
+
+The counter is 0-based, matching npm's default.
+
+## Promote to the next stage
+
+Walk a maturity ladder — `alpha → beta → rc → stable` by default — resetting the counter at each step. Promoting the last stage finalizes (drops the pre-release); pass `--ladder` for your own stages.
+
+```nu
+def promote-stage [--ladder: list<string> = [alpha beta rc]]: string -> string {
+    let v = $in | semver decode
+    let stage = $v.prerelease | get 0? | default null
+    let i = $ladder | enumerate | where item == $stage | get index | get 0?
+    if ($i == null) {
+        error make { msg: $"not on a known pre-release stage \(($ladder | str join ', ')); pre-release is '($v.prerelease | str join '.')'" }
+    }
+    if ($i == (($ladder | length) - 1)) {
+        $v | merge { prerelease: [], build: [] } | semver encode   # last stage → finalize
+    } else {
+        $v | merge { prerelease: [($ladder | get ($i + 1)) '0'], build: [] } | semver encode
+    }
+}
+
+'1.2.0-alpha.3' | promote-stage                    # => '1.2.0-beta.0'
+'1.2.0-rc.2'    | promote-stage                    # => '1.2.0'        (last stage finalizes)
+'1.0.0-dev.4'   | promote-stage --ladder [dev rc]  # => '1.0.0-rc.0'
+```
+
+A version that isn't on a known stage errors rather than guessing where it sits on the ladder.
+
+## Finalize a release
+
+Drop the pre-release (and build metadata) to ship the stable version — the counterpart to opening one. Like npm's `release`, but idempotent: finalizing an already-stable version returns it unchanged instead of erroring.
+
+```nu
+def finalize []: string -> string {
+    $in | semver decode | merge { prerelease: [], build: [] } | semver encode
+}
+
+'1.2.4-rc.3+build.9' | finalize   # => '1.2.4'
+'1.2.4'              | finalize   # => '1.2.4'   (idempotent)
+```
+
+# CI/CD recipes
+
+## Resolve the latest released version from git tags
 
 Read the repo's tags, keep the ones that are valid semver (stripping a leading `v`), drop pre-releases, and take the highest. This is the "what's currently in production" lookup most pipelines start from. `git tag` output that isn't a version (`nightly`, `latest`, …) is filtered out by `is-valid`, so the list can be noisy.
 
@@ -152,7 +268,7 @@ def latest-release []: nothing -> string {
 
 To include pre-releases (e.g. to resolve the latest release-candidate), drop the `where` command.
 
-### Build a pre-release tag for a non-master branch
+## Build a pre-release tag for a non-master branch
 
 CI builds off a feature branch should not claim a clean release number. Take the latest release, bump the patch to point at the line the branch targets, then stamp the branch name into the pre-release identifiers and the short commit SHA into the build metadata.
 
@@ -177,7 +293,7 @@ branch-tag '1.4.2'
 # => -1
 ```
 
-### Derive the next version from conventional commits
+## Derive the next version from conventional commits
 
 Pair `semver` with [`ccommit`](https://github.com/lassoColombo/conventional-commit) to compute the next tag from the commits since the last release: in this example a breaking change bumps major, a `feat` bumps minor, a `fix`/`perf`/`refactor` bumps patch.
 
@@ -206,7 +322,7 @@ def next-version [last?: string]: nothing -> any {
 }
 ```
 
-### Maintain a per-major support matrix
+## Maintain a per-major support matrix
 
 Collapse a tag list to the highest release on each major line
 

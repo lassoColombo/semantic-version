@@ -64,6 +64,12 @@ def "compare raises a descriptive error on a malformed record" [] {
 }
 
 @test
+def "compare rejects a record with a wrong-typed field" [] {
+    assert error {|| { major: 'x', minor: 0, patch: 0, prerelease: [], build: [] } | compare ('1.0.0' | decode) }
+    assert error {|| ('1.0.0' | decode) | compare { major: 1, minor: 0, patch: 0, prerelease: 'rc', build: [] } }
+}
+
+@test
 def "compare follows spec rule 11 example chain" [] {
     # https://semver.org/#spec-item-11
     # 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta

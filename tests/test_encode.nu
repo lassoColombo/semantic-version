@@ -69,3 +69,50 @@ def "encode is the inverse of decode for a wide range of valid versions" [] {
     ]
     assert equal ($versions | decode | encode) $versions
 }
+
+@test
+def "encode rejects a number field of the wrong type or sign" [] {
+    assert error {|| { major: 'x', minor: 0, patch: 0, prerelease: [], build: [] } | encode }
+    assert error {|| { major: -1, minor: 0, patch: 0, prerelease: [], build: [] } | encode }
+    assert error {|| { major: 1, minor: 2.5, patch: 0, prerelease: [], build: [] } | encode }
+}
+
+@test
+def "encode rejects prerelease/build that are not lists of strings" [] {
+    assert error {|| { major: 1, minor: 0, patch: 0, prerelease: 'rc', build: [] } | encode }
+    assert error {|| { major: 1, minor: 0, patch: 0, prerelease: [rc 1], build: [] } | encode }
+}
+
+@test
+def "encode rejects identifiers that violate the spec" [] {
+    assert error {|| { major: 1, minor: 0, patch: 0, prerelease: ['has space'], build: [] } | encode }
+    assert error {|| { major: 1, minor: 0, patch: 0, prerelease: [''], build: [] } | encode }
+    # numeric pre-release identifier with a leading zero (spec rule 9)
+    assert error {|| { major: 1, minor: 0, patch: 0, prerelease: ['01'], build: [] } | encode }
+    # illegal character in a build identifier
+    assert error {|| { major: 1, minor: 0, patch: 0, prerelease: [], build: ['a+b'] } | encode }
+}
+
+@test
+def "encode allows leading zeros in build identifiers per spec rule 10" [] {
+    let s = { major: 1, minor: 2, patch: 3, prerelease: [], build: ['01' '02'] } | encode
+    assert equal $s '1.2.3+01.02'
+}
+
+@test
+def "encode error message names the offending field" [] {
+    let msg = try { { major: 'x', minor: 0, patch: 0, prerelease: [], build: [] } | encode } catch {|e| $e.msg }
+    assert ($msg | str contains 'major')
+    assert ($msg | str contains 'non-negative int')
+}
+
+@test
+def "encode broadcasts over the table that decode yields" [] {
+    # `decode` over a list produces a table (stream), not a `list<record>`.
+    # encode must broadcast over it exactly like a plain list — this guards
+    # the shared dispatch helper's table handling.
+    let versions = ['1.0.0' '2.0.0-rc.1' '1.5.3+build.7']
+    let decoded = $versions | decode
+    assert equal (($decoded | describe --detailed).type) 'list'
+    assert equal ($decoded | encode) $versions
+}

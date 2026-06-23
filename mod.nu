@@ -13,9 +13,13 @@
 #
 # Decoding a string that does not conform to the spec raises an error. The
 # record-consuming commands (encode, compare, bump) likewise raise a
-# descriptive error — showing the expected shape — when handed a record that
-# is missing any required field.
-#
+# descriptive error — showing the expected shape — when handed anything that
+# is not a well-formed semver record: a non-record, a missing required field,
+# or a field of the wrong type (major/minor/patch must be non-negative ints;
+# prerelease/build must be lists of strings). `encode` is stricter still — it
+# rejects a record whose identifiers would not render to a spec-conforming
+# string, so it stays a true inverse of `decode`.
+
 
 # Official spec regex (named-captures form) from semver.org. 
 const SEMVER_REGEX = '^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?P<build>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$'
@@ -91,31 +95,78 @@ def example-record []: nothing -> record {
 }
 
 # Validate that the piped value is a semver record carrying every required
-# field, returning it unchanged. Raises a descriptive error — showing a
-# complete example record — when the shape is wrong.
+# field with the right type, returning it unchanged. Raises a descriptive
+# error — showing a complete example record — when the shape is wrong. This is
+# structural/type validation only (so compare and bump never trip over a raw
+# `into int` failure); encode-one additionally enforces the spec's identifier
+# rules on the rendered string.
 def check-record []: any -> record {
   let v = $in
   let example = example-record
+
   if (($v | describe) | str starts-with 'record') == false {
     error make {
       msg: $"expected a semver record, got a ($v | describe).\nexpected shape, e.g.: ($example | to nuon)"
     }
   }
-  let missing = $example | columns | where {|c| $c not-in ($v | columns)}
-  if ($missing | is-not-empty) {
+
+  $example | columns | where {|c| $c not-in ($v | columns)}
+  | if ($in | is-not-empty) {
     error make {
-      msg: $"semver record is missing required field\(s\) '($missing | str join "', '")'.\nexpected shape, e.g.: ($example | to nuon)"
+      msg: $"semver record is missing required field\(s\) '($in | str join "', '")'.\nexpected shape, e.g.: ($example | to nuon)"
+    }
+  }
+  # major/minor/patch must be non-negative integers
+  [major minor patch] | where {|f|
+    let x = $v | get $f
+    (($x | describe) != 'int') or ($x < 0)
+  } | if ($in | is-not-empty) {
+    error make {
+      msg: $"semver record field\(s\) '($in | str join "', '")' must be a non-negative int.\nexpected shape, e.g.: ($example | to nuon)"
+    }
+  }
+  # prerelease/build must be lists of strings
+  [prerelease build] | where {|f|
+    let x = $v | get $f
+    (not ($x | describe | str starts-with 'list')) or (not ($x | all {|e| ($e | describe) == 'string'}))
+  } | if ($in | is-not-empty) {
+    error make {
+      msg: $"semver record field\(s\) '($in | str join "', '")' must be a list of strings.\nexpected shape, e.g.: ($example | to nuon)"
     }
   }
   $v
 }
 
-# Render one semver record back to its canonical string form.
+# Render one semver record back to its canonical string form. The rendered
+# string is validated against the official spec regex, so encode is a strict
+# inverse of decode: a record whose identifiers violate the spec (empty,
+# non-alphanumeric, or a leading-zero numeric pre-release identifier) is
+# rejected rather than silently rendered into a non-conforming string.
 def encode-one []: record -> string {
   let v = $in | check-record
   let pre = if ($v.prerelease | is-empty) { '' } else { '-' + ($v.prerelease | str join '.') }
   let bld = if ($v.build | is-empty) { '' } else { '+' + ($v.build | str join '.') }
-  $"($v.major).($v.minor).($v.patch)($pre)($bld)"
+  let s = $"($v.major).($v.minor).($v.patch)($pre)($bld)"
+  if ($s !~ $SEMVER_REGEX) {
+    error make {
+      msg: $"cannot encode record into a valid semver string: would produce '($s)'"
+    }
+  }
+  $s
+}
+
+# Apply `op` to a lone item, or broadcast it element-wise over a list or
+# table. The one place the broadcasting trio (decode, is-valid, encode)
+# decides "single value or many?", so the three can never drift apart.
+# `describe --detailed` reports both lists and tables as 'list', so the
+# table that `decode` yields is dispatched the same as a plain list.
+def broadcast [op: closure]: any -> any {
+  let v = $in
+  if (($v | describe --detailed).type == 'list') {
+    $v | each { $in | do $op }
+  } else {
+    $v | do $op
+  }
 }
 
 # ---------- public ----------
@@ -125,14 +176,8 @@ def encode-one []: record -> string {
 @search-terms semver decode parse version
 @example "core only" { '1.2.3' | semver decode } --result { major: 1, minor: 2, patch: 3, prerelease: [], build: [] }
 @example "prerelease and build" { '1.2.3-rc.1+exp.5114' | semver decode } --result { major: 1, minor: 2, patch: 3, prerelease: [rc 1], build: [exp 5114] }
-@example "list broadcasting" { ['1.2.3' '2.0.0-rc.1'] | semver decode | length } --result 2
 export def decode []: [string -> record, list<string> -> list<record>] {
-  let v = $in
-  if (($v | describe) == 'string') {
-    $v | decode-one
-  } else {
-    $v | each { $in | decode-one }
-  }
+  $in | broadcast { $in | decode-one }
 }
 
 # True when the piped string is a valid semver per the spec BNF. Broadcasts
@@ -141,28 +186,16 @@ export def decode []: [string -> record, list<string> -> list<record>] {
 @example "valid" { '1.2.3-rc.1' | semver is-valid } --result true
 @example "leading zero rejected" { '01.2.3' | semver is-valid } --result false
 @example "build allows leading zeros" { '1.2.3+01' | semver is-valid } --result true
-@example "list broadcasting" { ['1.2.3' '01.2.3'] | semver is-valid } --result [true false]
 export def is-valid []: [string -> bool, list<string> -> list<bool>] {
-  let v = $in
-  if (($v | describe) == 'string') {
-    $v =~ $SEMVER_REGEX
-  } else {
-    $v | each { $in =~ $SEMVER_REGEX }
-  }
+  $in | broadcast { $in =~ $SEMVER_REGEX }
 }
 
 # Render a semver record back to its canonical string form, or a list
 # of records into a list of strings.
 @search-terms semver encode format render stringify
 @example "roundtrip" { '1.2.3-rc.1+exp.5114' | semver decode | semver encode } --result '1.2.3-rc.1+exp.5114'
-@example "list broadcasting" { ['1.2.3' '2.0.0'] | semver decode | semver encode } --result ['1.2.3' '2.0.0']
 export def encode []: [record -> string, list<record> -> list<string>] {
-  let v = $in
-  if (($v | describe) | str starts-with 'record') {
-    $v | encode-one
-  } else {
-    $v | each { $in | encode-one }
-  }
+  $in | broadcast { $in | encode-one }
 }
 
 # Compare the piped semver record against another per spec. Returns -1 when
