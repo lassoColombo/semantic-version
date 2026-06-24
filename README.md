@@ -10,6 +10,10 @@ parse, validate, compare, sort, and bump versions as structured data.
   - [Why?](#why?)
   - [Installation](#installation)
   - [Quick start](#quick-start)
+  - [Spec conformance - what is conventional anyway?](#spec-conformance---what-is-conventional-anyway?)
+      - [Strict in both directions](#strict-in-both-directions)
+      - [No `bump prerelease`](#no-`bump-prerelease`)
+      - [Untrusted input](#untrusted-input)
   - [Commands](#commands)
     - [`semver bump major`](#`semver-bump-major`)
     - [`semver bump minor`](#`semver-bump-minor`)
@@ -19,10 +23,6 @@ parse, validate, compare, sort, and bump versions as structured data.
     - [`semver encode`](#`semver-encode`)
     - [`semver is-valid`](#`semver-is-valid`)
     - [`semver sort`](#`semver-sort`)
-  - [Spec conformance - what is conventional anyway?](#spec-conformance---what-is-conventional-anyway?)
-      - [Strict in both directions](#strict-in-both-directions)
-      - [No `bump prerelease`](#no-`bump-prerelease`)
-      - [Untrusted input](#untrusted-input)
   - [CI/CD recipes](#ci/cd-recipes)
     - [Resolve the latest released version from git tags](#resolve-the-latest-released-version-from-git-tags)
     - [Build a pre-release tag for a non-master branch](#build-a-pre-release-tag-for-a-non-master-branch)
@@ -32,6 +32,7 @@ parse, validate, compare, sort, and bump versions as structured data.
       - [Bump the counter (npm `prerelease`)](#bump-the-counter-(npm-`prerelease`))
       - [Promote to the next stage](#promote-to-the-next-stage)
       - [Finalize a release](#finalize-a-release)
+
 
 
 ## Why?
@@ -103,22 +104,54 @@ $prerelease | semver compare $release
 # => '2.0.0'
 ```
 
+## Spec conformance - what is conventional anyway?
+
+This module adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+
+#### Strict in both directions
+
+This module will strictly enforce spec complianceL
+- `decode` will not accept a string the spec rejects
+- `encode` will not emit one 
+
+The two are exact inverses: `$version | semver decode | semver encode` gives back the original string.
+
+#### Bumping tags
+
+This module provides utility functions to bump a tag by major, minor and patch, but not by prerelease.  
+That's because prerelease has no conventional sape and no bump strategy: the spec fixes pre-release *format* and *ordering* but defines no progression.
+
+If you do want a convention, [Pre-release strategies](#pre-release-strategies) collects the common ones (npm-style counter, stage promotion, finalize) as ready-to-copy recipes.
+
+#### Untrusted input
+
+A single non-conforming item aborts the whole pipeline, so either filter with `semver is-valid` before decoding, or catch per item:
+```nu
+['1.4.0' 'v1.0.0' '2.0.0-rc.1' 'latest']
+| each { try {$in | semver decode} catch {null} }   # per-item try/catch: decode is strict, so guard each element
+| compact
+| semver sort
+| semver encode
+# => ['1.4.0' '2.0.0-rc.1']
+```
+
 ## Commands
 
-| Command | Signature | Description |
-| --- | --- | --- |
-| [`semver bump major`](#semver-bump-major) | `record -> record` | Increment the major number; reset minor and patch to 0 and clear any pre-release and build metadata. |
-| [`semver bump minor`](#semver-bump-minor) | `record -> record` | Increment the minor number; reset patch to 0 and clear any pre-release and build metadata. |
-| [`semver bump patch`](#semver-bump-patch) | `record -> record` | Increment the patch number; clear any pre-release and build metadata. |
-| [`semver compare`](#semver-compare) | `record -> int` | Compare the piped semver record against another per spec. |
-| [`semver decode`](#semver-decode) | `string -> record` / `list<string> -> list<record>` | Decode a semver string into a record, or a list of strings into a list of records. |
-| [`semver encode`](#semver-encode) | `record -> string` / `list<record> -> list<string>` | Render a semver record back to its canonical string form, or a list of records into a list of strings. |
-| [`semver is-valid`](#semver-is-valid) | `string -> bool` / `list<string> -> list<bool>` | True when the piped string is a valid semver per the spec BNF. |
-| [`semver sort`](#semver-sort) | `list<record> -> list<record>` | Sort a list of semver records by precedence. |
+| Command                                   | Signature                                           | Description                                                                                            |
+| ----------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| [`semver bump major`](#semver-bump-major) | `record -> record`                                  | Increment the major number; reset minor and patch to 0 and clear any pre-release and build metadata.   |
+| [`semver bump minor`](#semver-bump-minor) | `record -> record`                                  | Increment the minor number; reset patch to 0 and clear any pre-release and build metadata.             |
+| [`semver bump patch`](#semver-bump-patch) | `record -> record`                                  | Increment the patch number; clear any pre-release and build metadata.                                  |
+| [`semver compare`](#semver-compare)       | `record -> int`                                     | Compare the piped semver record against another per spec.                                              |
+| [`semver decode`](#semver-decode)         | `string -> record` / `list<string> -> list<record>` | Decode a semver string into a record, or a list of strings into a list of records.                     |
+| [`semver encode`](#semver-encode)         | `record -> string` / `list<record> -> list<string>` | Render a semver record back to its canonical string form, or a list of records into a list of strings. |
+| [`semver is-valid`](#semver-is-valid)     | `string -> bool` / `list<string> -> list<bool>`     | True when the piped string is a valid semver per the spec BNF.                                         |
+| [`semver sort`](#semver-sort)             | `list<record> -> list<record>`                      | Sort a list of semver records by precedence.                                                           |
 
 ### `semver bump major`
 
-Increment the major number; reset minor and patch to 0 and clear any pre-release and build metadata.
+Increment the major number; reset minor and patch to 0 and clear  
+any pre-release and build metadata.
 
 **Signature:** `record -> record`
 
@@ -134,7 +167,8 @@ Increment the major number; reset minor and patch to 0 and clear any pre-release
 
 ### `semver bump minor`
 
-Increment the minor number; reset patch to 0 and clear any pre-release and build metadata.
+Increment the minor number; reset patch to 0 and clear any  
+pre-release and build metadata.
 
 **Signature:** `record -> record`
 
@@ -166,15 +200,16 @@ Increment the patch number; clear any pre-release and build metadata.
 
 ### `semver compare`
 
-Compare the piped semver record against another per spec. Returns -1 when the piped record sorts before `other`, 1 when after, 0 when equal.
+Compare the piped semver record against another per spec. Returns -1 when  
+the piped record sorts before `other`, 1 when after, 0 when equal.
 
 **Signature:** `record -> int`
 
 **Parameters**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `other` | `record` | the semver record to compare the piped one against |
+| Parameter | Type     | Description                                        |
+| --------- | -------- | -------------------------------------------------- |
+| `other`   | `record` | the semver record to compare the piped one against |
 
 **Search terms:** `semver`, `compare`, `cmp`, `precedence`, `ordering`
 
@@ -196,7 +231,8 @@ Compare the piped semver record against another per spec. Returns -1 when the pi
 
 ### `semver decode`
 
-Decode a semver string into a record, or a list of strings into a list of records. Raises an error on input that does not conform to the spec.
+Decode a semver string into a record, or a list of strings into a list of  
+records. Raises an error on input that does not conform to the spec.
 
 **Signature:** `string -> record` / `list<string> -> list<record>`
 
@@ -216,7 +252,8 @@ Decode a semver string into a record, or a list of strings into a list of record
 
 ### `semver encode`
 
-Render a semver record back to its canonical string form, or a list of records into a list of strings.
+Render a semver record back to its canonical string form, or a list  
+of records into a list of strings.
 
 **Signature:** `record -> string` / `list<record> -> list<string>`
 
@@ -232,7 +269,8 @@ Render a semver record back to its canonical string form, or a list of records i
 
 ### `semver is-valid`
 
-True when the piped string is a valid semver per the spec BNF. Broadcasts over a list of strings, returning one bool per element.
+True when the piped string is a valid semver per the spec BNF. Broadcasts  
+over a list of strings, returning one bool per element.
 
 **Signature:** `string -> bool` / `list<string> -> list<bool>`
 
@@ -260,10 +298,10 @@ Sort a list of semver records by precedence.
 
 **Signature:** `list<record> -> list<record>`
 
-**Parameters**
+**Flags**
 
-| Parameter | Type | Description |
-| --- | --- | --- |
+| Flag        | Type     | Description                                                        |
+| ----------- | -------- | ------------------------------------------------------------------ |
 | `--reverse` | `switch` | sort by descending precedence (highest first) instead of ascending |
 
 **Search terms:** `semver`, `sort`, `order`, `rank`
@@ -275,33 +313,6 @@ Sort a list of semver records by precedence.
 ['1.10.0' '1.2.0' '1.2.0-rc.1'] | each { semver decode } | semver sort | each { semver encode }
 # => ["1.2.0-rc.1", "1.2.0", "1.10.0"]
 ```
-
-## Spec conformance - what is conventional anyway?
-
-This module adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
-
-#### Strict in both directions
-
-`decode` will not accept a string the spec rejects, and `encode` will not emit one — the two are exact inverses. `$version | semver decode | semver encode` gives back the original string.
-
-#### No `bump prerelease`
-
-Pre-release has no conventional sape and no bump strategy: the spec fixes pre-release *format* and *ordering* but defines no progression.
-
-If you do want a convention, [Pre-release strategies](#pre-release-strategies) collects the common ones (npm-style counter, stage promotion, finalize) as ready-to-copy recipes.
-
-#### Untrusted input
-
-A single non-conforming item aborts the whole pipeline, so either filter with `semver is-valid` before decoding, or catch per item:
-```nu
-['1.4.0' 'v1.0.0' '2.0.0-rc.1' 'latest']
-| each { try {$in | semver decode} catch {null} }   # per-item try/catch: decode is strict, so guard each element
-| compact
-| semver sort
-| semver encode
-# => ['1.4.0' '2.0.0-rc.1']
-```
-
 
 ## CI/CD recipes
 
